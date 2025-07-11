@@ -36,10 +36,15 @@ def check_documents_v2(fields):
 load_dotenv()
 
 # Azure setup
-STORAGE_ACCOUNT_NAME = os.getenv("STORAGE_ACCOUNT_NAME")
-STORAGE_ACCOUNT_KEY = os.getenv("STORAGE_ACCOUNT_KEY")
-container_name = os.getenv("CONTAINER_NAME")
-container_path = os.getenv("CONTAINER_PATH")
+# STORAGE_ACCOUNT_NAME = os.getenv("STORAGE_ACCOUNT_NAME")
+# STORAGE_ACCOUNT_KEY = os.getenv("STORAGE_ACCOUNT_KEY")
+# container_name = os.getenv("CONTAINER_NAME")
+# container_path = os.getenv("CONTAINER_PATH")
+
+STORAGE_ACCOUNT_NAME = st.secrets["STORAGE_ACCOUNT_NAME"]
+STORAGE_ACCOUNT_KEY = st.secrets["STORAGE_ACCOUNT_KEY"]
+container_name = st.secrets["CONTAINER_NAME"]
+container_path = st.secrets["CONTAINER_PATH"]
 
 connect_str = f"DefaultEndpointsProtocol=https;AccountName={STORAGE_ACCOUNT_NAME};AccountKey={STORAGE_ACCOUNT_KEY};EndpointSuffix=core.windows.net"
 blob_service_client = BlobServiceClient.from_connection_string(connect_str)
