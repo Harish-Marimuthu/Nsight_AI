@@ -1,4 +1,0 @@
-streamlit 
-azure-storage-blob 
-PyMuPDF
-python-dotenv
