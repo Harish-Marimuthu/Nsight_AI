@@ -236,67 +236,85 @@ elif st.session_state.page == "Dashboard":
 
     st.markdown("## Document Classification - Last 7 Days")
 
-    # Get today's date and last 7 days
-    today = datetime.date.today()
-    last_7_dates = [(today - datetime.timedelta(days=i)) for i in range(6, -1, -1)]
+    st.markdown("### Document Processing Trend (Last 7 Days)")
 
-    # Initialize document counts
-    doc_counts = {
-        date: {"Invoice": 0, "PurchaseOrder": 0, "SalesOrder": 0, "Bills": 0, "Others": 0}
-        for date in last_7_dates
-    }
+# Load credentials from Streamlit secrets
+STORAGE_ACCOUNT_NAME = st.secrets["STORAGE_ACCOUNT_NAME"]
+STORAGE_ACCOUNT_KEY = st.secrets["STORAGE_ACCOUNT_KEY"]
+CONTAINER_NAME = st.secrets["CONTAINER_NAME"]
+container_path = st.secrets["CONTAINER_PATH"]
 
-    # Process each blob
-    for blob in container_client.list_blobs(name_starts_with=container_path):
-        if blob.name.endswith('.pdf') and '/processed/' not in blob.name:
-            upload_date = blob.last_modified.date()
-            if upload_date in doc_counts:
-                try:
-                    # Read blob PDF content
-                    blob_data = container_client.get_blob_client(blob.name).download_blob(timeout=30).readall()
-                    pdf_doc = fitz.open(stream=blob_data, filetype="pdf")
-                    extracted_text = ""
-                    for page in pdf_doc:
-                        extracted_text += page.get_text()
-                    pdf_doc.close()
+# Azure Blob setup
+connect_str = (
+    f"DefaultEndpointsProtocol=https;"
+    f"AccountName={STORAGE_ACCOUNT_NAME};"
+    f"AccountKey={STORAGE_ACCOUNT_KEY};"
+    f"EndpointSuffix=core.windows.net"
+)
 
-                    # Classify document type
-                    words = extracted_text.split()
-                    doc_type = check_documents_v2(words)
-                    doc_counts[upload_date][doc_type] += 1
+blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+container_client = blob_service_client.get_container_client(CONTAINER_NAME)
 
-                except Exception as e:
-                    st.warning(f"Failed to read: {blob.name} — {e}")
+# Dropdown for document type
+vis_type = st.selectbox("Select Document Type for Visualization", folders, index=0)
 
-    # Convert to DataFrame
-    chart_data = []
-    for date, types in doc_counts.items():
-        for doc_type, count in types.items():
-            chart_data.append({
-                "Date": date.strftime("%Y-%m-%d"),
-                "Document Type": doc_type,
-                "Count": count
-            })
+# Define paths
+vis_base = f"{container_path}/{vis_type}"
+vis_proc = f"{vis_base}/processed"
 
-    df_chart = pd.DataFrame(chart_data)
+# Helper to extract date from blob name
+def extract_date(blob_name):
+    match = re.search(r"(\d{4}-\d{2}-\d{2})", blob_name)
+    return match.group(1) if match else None
 
-    # Dropdown to select document type
-    doc_type_list = ["Invoice", "PurchaseOrder", "SalesOrder", "Bills", "Others"]
-    selected_doc_type = st.selectbox("Select Document Type to View", doc_type_list)
+# Fetch all and processed blobs
+all_blobs = [b.name for b in container_client.list_blobs(name_starts_with=vis_base) if b.name.endswith(".pdf")]
+proc_blobs = [b.name for b in container_client.list_blobs(name_starts_with=vis_proc) if b.name.endswith(".pdf")]
 
-    # Filter chart data
-    filtered_df = df_chart[df_chart["Document Type"] == selected_doc_type]
+# Count blobs by date and status
+date_counts = {}
+for name in all_blobs:
+    date = extract_date(name)
+    if not date:
+        continue
+    if date not in date_counts:
+        date_counts[date] = {"Pending": 0, "Processed": 0}
+    if f"{vis_type}/processed/" in name:
+        date_counts[date]["Processed"] += 1
+    else:
+        date_counts[date]["Pending"] += 1
 
-    # Bar chart for selected document type
-    chart = alt.Chart(filtered_df).mark_bar().encode(
-        x=alt.X("Date:N", title="Date", axis=alt.Axis(labelAngle=-45)),
-        y=alt.Y("Count:Q", title="Document Count"),
-        color=alt.value("#1f77b4"),
-        tooltip=["Date", "Count"]
-    ).properties(
-        width=700,
-        height=400,
-        title=f"{selected_doc_type} Count Over Last 7 Days"
+# Prepare DataFrame
+data = []
+for date, counts in date_counts.items():
+    data.append({"Date": date, "Status": "Pending", "Count": counts["Pending"]})
+    data.append({"Date": date, "Status": "Processed", "Count": counts["Processed"]})
+
+df = pd.DataFrame(data)
+
+# Display chart
+if df.empty:
+    st.info("No data available for the selected document type.")
+else:
+    df["Date"] = pd.to_datetime(df["Date"])
+    df = df.sort_values("Date").tail(14)  # last 7 days x 2 statuses
+    df["Date"] = df["Date"].dt.strftime("%d %b")
+
+    chart = (
+        alt.Chart(df)
+        .mark_bar()
+        .encode(
+            x=alt.X("Date:N", title="Date", axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("Count:Q", title="Document Count"),
+            color=alt.Color("Status:N", scale=alt.Scale(domain=["Processed", "Pending"], range=["green", "orange"])),
+            tooltip=["Date", "Status", "Count"],
+        )
+        .properties(
+            width=500,
+            height=400
+        )
     )
 
     st.altair_chart(chart, use_container_width=True)
+
+
